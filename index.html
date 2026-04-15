@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BTC MARKET WEATHER</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --border: #30363d;
+      --border-subtle: #21262d;
+      --green: #00ff88;
+      --red: #ff4444;
+      --yellow: #ffcc00;
+      --blue: #4da6ff;
+      --text: #c9d1d9;
+      --muted: #6e7681;
+      --bright: #ffffff;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 13px;
+      line-height: 1.6;
+      min-height: 100vh;
+      padding: 24px;
+    }
+    .container { max-width: 960px; margin: 0 auto; }
+
+    /* HEADER */
+    .header {
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 12px;
+      margin-bottom: 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+    }
+    .header h1 {
+      color: var(--bright);
+      font-size: 0.95em;
+      letter-spacing: 3px;
+      font-weight: normal;
+    }
+    .header .meta { color: var(--muted); font-size: 0.8em; text-align: right; }
+    .refresh-badge {
+      display: inline-block;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 2px 8px;
+      margin-top: 4px;
+      font-size: 0.85em;
+    }
+
+    /* SECTIONS */
+    .section { margin-bottom: 20px; }
+    .section-title {
+      color: var(--muted);
+      font-size: 0.75em;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      border-left: 3px solid var(--border);
+      padding-left: 8px;
+      margin-bottom: 8px;
+    }
+
+    /* TABLES */
+    table { width: 100%; border-collapse: collapse; }
+    th {
+      background: var(--surface);
+      color: var(--muted);
+      text-align: left;
+      padding: 7px 12px;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.78em;
+      letter-spacing: 0.5px;
+      font-weight: normal;
+    }
+    td { padding: 6px 12px; border-bottom: 1px solid var(--border-subtle); vertical-align: top; }
+    tr:nth-child(even) td { background: #0f151d; }
+
+    /* COLORS */
+    .g { color: var(--green); font-weight: bold; }
+    .r { color: var(--red); font-weight: bold; }
+    .y { color: var(--yellow); font-weight: bold; }
+    .b { color: var(--blue); }
+    .m { color: var(--muted); font-style: italic; }
+
+    /* GRID */
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+
+    /* PRICE */
+    .price-big { font-size: 1.8em; color: var(--blue); font-weight: bold; letter-spacing: 1px; }
+    .price-change { font-size: 1em; margin-left: 10px; }
+
+    /* FNG */
+    .fng-display { display: flex; align-items: center; gap: 16px; padding: 10px 0; }
+    .fng-number { font-size: 2.4em; font-weight: bold; line-height: 1; }
+    .fng-bar-wrap {
+      flex: 1; height: 8px;
+      background: var(--surface);
+      border-radius: 4px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    .fng-bar { height: 100%; border-radius: 4px; }
+    .fng-label { font-size: 0.82em; color: var(--muted); margin-top: 4px; }
+
+    /* SESGO */
+    .sesgo-box { padding: 14px 16px; border-radius: 6px; line-height: 1.8; font-size: 0.88em; }
+    .sesgo-alcista { background: #0a1f12; border: 1px solid #00ff8840; }
+    .sesgo-bajista { background: #1f0a0a; border: 1px solid #ff444440; }
+    .sesgo-neutral { background: #1a1a0a; border: 1px solid #ffcc0040; }
+
+    /* TRADE */
+    .trade-box { background: #0a1525; border: 1px solid #4da6ff40; border-radius: 6px; padding: 14px 16px; }
+    .trade-box table { margin-top: 10px; }
+
+    /* TAGS */
+    .tag { display: inline-block; padding: 2px 9px; border-radius: 4px; font-size: 0.76em; font-weight: bold; margin-right: 5px; }
+    .tag-long  { background: #00ff8815; color: var(--green);  border: 1px solid #00ff8850; }
+    .tag-short { background: #ff444415; color: var(--red);    border: 1px solid #ff444450; }
+    .tag-blue  { background: #4da6ff15; color: var(--blue);   border: 1px solid #4da6ff50; }
+    .tag-neutral { background: #ffcc0015; color: var(--yellow); border: 1px solid #ffcc0050; }
+
+    /* LOADING */
+    .loading { color: var(--muted); padding: 8px 0; }
+
+    /* FOOTER */
+    .footer {
+      margin-top: 32px; padding-top: 12px;
+      border-top: 1px solid var(--border-subtle);
+      color: var(--muted); font-size: 0.75em; text-align: center;
+    }
+
+    /* RESPONSIVE */
+    @media (max-width: 700px) {
+      .grid-2 { grid-template-columns: 1fr; }
+      body { padding: 14px; }
+      .price-big { font-size: 1.4em; }
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <!-- HEADER -->
+  <div class="header">
+    <div><h1>BTC/USDT &mdash; MARKET WEATHER</h1></div>
+    <div class="meta">
+      <div id="timestamp">—</div>
+      <div class="refresh-badge">Próximo refresh: <span id="countdown">5:00</span></div>
+    </div>
+  </div>
+
+  <!-- PRECIO + MACRO -->
+  <div class="grid-2">
+    <div class="section">
+      <div class="section-title">1. Precio</div>
+      <div id="precio-content" class="loading">Cargando...</div>
+    </div>
+    <div class="section">
+      <div class="section-title">2. Macro</div>
+      <div id="macro-content" class="loading">Cargando...</div>
+    </div>
+  </div>
+
+  <!-- TÉCNICO -->
+  <div class="section">
+    <div class="section-title">3. Técnico</div>
+    <div id="tecnico-content" class="loading">Cargando...</div>
+  </div>
+
+  <!-- DERIVADOS -->
+  <div class="section">
+    <div class="section-title">4. Derivados</div>
+    <div id="derivados-content" class="loading">Cargando...</div>
+  </div>
+
+  <!-- SENTIMIENTO + SESGO -->
+  <div class="grid-2">
+    <div class="section">
+      <div class="section-title">5. Sentimiento</div>
+      <div id="sentimiento-content" class="loading">Cargando...</div>
+    </div>
+    <div class="section">
+      <div class="section-title">6. Sesgo</div>
+      <div id="sesgo-content" class="loading">Cargando...</div>
+    </div>
+  </div>
+
+  <!-- TRADE -->
+  <div class="section">
+    <div class="section-title">7. Propuesta de Trade</div>
+    <div id="trade-content" class="loading">Cargando...</div>
+  </div>
+
+  <div class="footer">
+    MAX MARKET WEATHER &mdash; Datos: Binance · Alternative.me &mdash; Actualización automática cada 5 min
+  </div>
+</div>
+
+<script>
+// ─────────────────────────────────────────────
+// UTILS
+// ─────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+const fmt = (n, d = 0) => n == null ? 'N/D' : n.toLocaleString('es-ES', { minimumFractionDigits: d, maximumFractionDigits: d });
+const fmtP = n => n == null ? 'N/D' : (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
+const clr  = n => n == null ? 'm' : n >= 0 ? 'g' : 'r';
+
+// ─────────────────────────────────────────────
+// INDICADORES
+// ─────────────────────────────────────────────
+function allEMA(values, period) {
+  if (values.length < period) return [];
+  const k = 2 / (period + 1);
+  let ema = values.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  const res = [ema];
+  for (let i = period; i < values.length; i++) {
+    ema = values[i] * k + ema * (1 - k);
+    res.push(ema);
+  }
+  return res;
+}
+
+function lastEMA(values, period) {
+  const a = allEMA(values, period);
+  return a.length ? a[a.length - 1] : null;
+}
+
+function calcRSI(closes, period = 14) {
+  if (closes.length < period + 1) return null;
+  const slice = closes.slice(-(period + 1));
+  const diffs = slice.slice(1).map((c, i) => c - slice[i]);
+  const avgGain = diffs.reduce((a, d) => a + Math.max(d, 0), 0) / period;
+  const avgLoss = diffs.reduce((a, d) => a + Math.abs(Math.min(d, 0)), 0) / period;
+  if (avgLoss === 0) return 100;
+  return 100 - 100 / (1 + avgGain / avgLoss);
+}
+
+function calcATR(candles, period = 14) {
+  if (candles.length < period + 1) return null;
+  const trs = [];
+  for (let i = 1; i < candles.length; i++) {
+    const h = +candles[i][2], l = +candles[i][3], pc = +candles[i-1][4];
+    trs.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
+  }
+  return trs.slice(-period).reduce((a, b) => a + b, 0) / period;
+}
+
+function calcMACD(closes) {
+  const e12 = allEMA(closes, 12);
+  const e26 = allEMA(closes, 26);
+  if (e12.length < 15 || !e26.length) return null;
+  const macdLine = e26.map((v, i) => e12[i + 14] - v);
+  const sig = allEMA(macdLine, 9);
+  if (!sig.length) return null;
+  const macd = macdLine[macdLine.length - 1];
+  const signal = sig[sig.length - 1];
+  return { macd, signal, histogram: macd - signal };
+}
+
+function calcCVD(candles) {
+  const deltas = candles.map(c => 2 * +c[9] - +c[5]);
+  return {
+    total: deltas.reduce((a, b) => a + b, 0),
+    recent10: deltas.slice(-10).reduce((a, b) => a + b, 0)
+  };
+}
+
+function calcPOC(candles, bucket = 1000) {
+  const map = {};
+  for (const c of candles) {
+    const key = Math.floor(+c[4] / bucket) * bucket;
+    map[key] = (map[key] || 0) + +c[5];
+  }
+  const best = Object.entries(map).sort((a, b) => b[1] - a[1])[0];
+  return best ? +best[0] : null;
+}
+
+function processKlines(candles) {
+  const closes = candles.map(c => +c[4]);
+  const recent20 = candles.slice(-20);
+  return {
+    ema50:      lastEMA(closes, 50),
+    ema200:     lastEMA(closes, 200),
+    rsi:        calcRSI(closes),
+    atr:        calcATR(candles),
+    macd:       calcMACD(closes),
+    cvd:        calcCVD(candles),
+    poc:        calcPOC(candles),
+    support:    Math.min(...recent20.map(c => +c[3])),
+    resistance: Math.max(...recent20.map(c => +c[2])),
+    close7dAgo: candles.length >= 8 ? +candles[candles.length - 8][4] : null,
+  };
+}
+
+// ─────────────────────────────────────────────
+// FETCH
+// ─────────────────────────────────────────────
+const B  = 'https://api.binance.com/api/v3';
+const BF = 'https://fapi.binance.com';
+
+async function get(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(r.status);
+  return r.json();
+}
+
+async function getYahoo(symbol) {
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=2d`;
+  const parse = data => {
+    const closes = data.chart.result[0].indicators.quote[0].close.filter(Boolean);
+    if (closes.length < 2) return null;
+    const prev = closes[closes.length - 2], curr = closes[closes.length - 1];
+    return { price: curr, change: (curr - prev) / prev * 100 };
+  };
+  try { return parse(await get(url)); }
+  catch {
+    try {
+      const proxy = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+      const w = await get(proxy);
+      return parse(JSON.parse(w.contents));
+    } catch { return null; }
+  }
+}
+
+async function loadData() {
+  const [ticker, k1d, k4h, k1h, premium, oi, oiHist, fng, sp, dxy, gold] =
+    await Promise.allSettled([
+      get(`${B}/ticker/24hr?symbol=BTCUSDT`),
+      get(`${B}/klines?symbol=BTCUSDT&interval=1d&limit=200`),
+      get(`${B}/klines?symbol=BTCUSDT&interval=4h&limit=200`),
+      get(`${B}/klines?symbol=BTCUSDT&interval=1h&limit=100`),
+      get(`${BF}/fapi/v1/premiumIndex?symbol=BTCUSDT`),
+      get(`${BF}/fapi/v1/openInterest?symbol=BTCUSDT`),
+      get(`${BF}/futures/data/openInterestHist?symbol=BTCUSDT&period=1h&limit=24`),
+      get('https://api.alternative.me/fng/?limit=1'),
+      getYahoo('%5EGSPC'),
+      getYahoo('DX-Y.NYB'),
+      getYahoo('GC%3DF'),
+    ]);
+  const v = r => r.status === 'fulfilled' ? r.value : null;
+  return { ticker: v(ticker), k1d: v(k1d), k4h: v(k4h), k1h: v(k1h),
+           premium: v(premium), oi: v(oi), oiHist: v(oiHist), fng: v(fng),
+           sp: v(sp), dxy: v(dxy), gold: v(gold) };
+}
+
+// ─────────────────────────────────────────────
+// SESGO
+// ─────────────────────────────────────────────
+function sesgoCalc(price, i1d, i4h, funding, fngVal) {
+  let s = 0;
+  const why = [];
+
+  if (i1d) {
+    if (i1d.ema50)  price > i1d.ema50  ? s++ : (s--, why.push('bajo EMA50 1D'));
+    if (i1d.ema200) price > i1d.ema200 ? s++ : (s--, why.push('bajo EMA200 1D'));
+    if (i1d.macd)   i1d.macd.histogram > 0 ? s++ : (s--, why.push('MACD 1D bajista'));
+    if (i1d.rsi != null) {
+      if (i1d.rsi > 55) s++;
+      else if (i1d.rsi < 45) { s--; why.push(`RSI 1D ${i1d.rsi.toFixed(0)}`); }
+    }
+    if (i1d.cvd) i1d.cvd.recent10 > 0 ? s++ : (s--, why.push('CVD 1D negativo'));
+  }
+  if (i4h) {
+    if (i4h.macd) i4h.macd.histogram > 0 ? s++ : s--;
+    if (i4h.rsi != null) i4h.rsi > 55 ? s++ : i4h.rsi < 45 ? s-- : null;
+    if (i4h.cvd)  i4h.cvd.recent10 > 0 ? s++ : s--;
+  }
+
+  if (funding != null) {
+    const f = funding * 100;
+    if (f < -0.05) { s += 2; why.push(`funding ${f.toFixed(4)}% (shorts pagando)`); }
+    else if (f < 0) s++;
+    else if (f > 0.05) s--;
+  }
+  if (fngVal != null) {
+    if (fngVal < 25) { s++; why.push(`Fear extremo (${fngVal})`); }
+    else if (fngVal > 75) s--;
+  }
+
+  const label = s >= 4 ? 'ALCISTA' : s <= -3 ? 'BAJISTA' : 'NEUTRAL';
+  const color = s >= 4 ? 'g' : s <= -3 ? 'r' : 'y';
+  return { label, score: s, color, why };
+}
+
+function tradeCalc(sesgo, score, price, atr) {
+  if (!price || !atr) return null;
+  const dir = sesgo === 'BAJISTA' ? 'Short' : (sesgo === 'ALCISTA' || score > 0) ? 'Long' : null;
+  if (!dir) return null;
+  const entry = price;
+  const risk  = 2 * atr;
+  const sl    = dir === 'Long' ? Math.round(entry - risk) : Math.round(entry + risk);
+  const tp1   = dir === 'Long' ? Math.round(entry + 1.5 * risk) : Math.round(entry - 1.5 * risk);
+  const tp2   = dir === 'Long' ? Math.round(entry + 2.5 * risk) : Math.round(entry - 2.5 * risk);
+  const conv  = Math.abs(score) >= 6 ? 'Alta' : Math.abs(score) >= 4 ? 'Media' : 'Baja';
+  return { dir, entry, sl, tp1, tp2, conv };
+}
+
+// ─────────────────────────────────────────────
+// RENDER
+// ─────────────────────────────────────────────
+function renderPrecio(ticker, i1d) {
+  if (!ticker) { $('precio-content').innerHTML = '<span class="r">Error cargando precio</span>'; return; }
+  const price   = +ticker.lastPrice;
+  const ch24    = +ticker.priceChangePercent;
+  const vol     = +ticker.quoteVolume;
+  const ch7d    = i1d?.close7dAgo ? (price - i1d.close7dAgo) / i1d.close7dAgo * 100 : null;
+  $('precio-content').innerHTML = `
+    <div style="padding:8px 0 12px">
+      <span class="price-big">$${fmt(price)}</span>
+      <span class="price-change ${clr(ch24)}">${fmtP(ch24)}</span>
+    </div>
+    <table>
+      <tr><td>Variación 7d</td><td class="${clr(ch7d)}">${fmtP(ch7d)}</td></tr>
+      <tr><td>Volumen 24h</td><td class="b">$${(vol/1e9).toFixed(2)}B</td></tr>
+      <tr><td>Rango 24h</td><td><span class="g">$${fmt(+ticker.lowPrice)}</span> — <span class="r">$${fmt(+ticker.highPrice)}</span></td></tr>
+    </table>`;
+}
+
+function renderMacro(sp, dxy, gold) {
+  const row = (name, d, price) => {
+    const read = () => {
+      if (!d) return '<span class="m">N/D</span>';
+      if (name === 'S&amp;P500') return d.change >= 0 ? '<span class="g">Risk-on</span>' : '<span class="r">Risk-off</span>';
+      if (name === 'DXY')    return Math.abs(d.change) < 0.2 ? '<span class="m">Plano</span>' : d.change > 0 ? '<span class="r">USD fuerte</span>' : '<span class="g">USD débil</span>';
+      if (name === 'Oro')    return d.change > 0.5 ? '<span class="r">Flight-to-safety</span>' : '<span class="m">Estable</span>';
+    };
+    return `<tr><td>${name}</td><td class="b">${d ? price(d.price) : '<span class="m">N/D</span>'}</td><td class="${d ? clr(d.change) : 'm'}">${d ? fmtP(d.change) : 'N/D'}</td><td>${read()}</td></tr>`;
+  };
+  $('macro-content').innerHTML = `
+    <table>
+      <tr><th>Activo</th><th>Precio</th><th>Var 24h</th><th>Lectura</th></tr>
+      ${row('S&amp;P500', sp,  p => fmt(p, 0))}
+      ${row('DXY',        dxy, p => fmt(p, 2))}
+      ${row('Oro',        gold,p => '$' + fmt(p, 0))}
+    </table>`;
+}
+
+function renderTecnico(price, i1d, i4h, i1h) {
+  const p   = v => v != null ? '<span class="b">$' + fmt(v) + '</span>' : '<span class="m">N/D</span>';
+  const dir = (ema, px) => ema == null || px == null ? '' : px > ema ? ' <span class="g">▲</span>' : ' <span class="r">▼</span>';
+  const macdHTML = m => {
+    if (!m) return '<span class="m">N/D</span>';
+    return m.histogram > 0
+      ? `<span class="g">Alcista</span> <span class="m">(${fmt(m.histogram, 0)})</span>`
+      : `<span class="r">Bajista</span> <span class="m">(${fmt(m.histogram, 0)})</span>`;
+  };
+  const rsiHTML = r => {
+    if (r == null) return '<span class="m">N/D</span>';
+    const c = r > 70 ? 'r' : r < 30 ? 'g' : r > 55 ? 'g' : r < 45 ? 'r' : 'y';
+    return `<span class="${c}">${r.toFixed(0)}</span>`;
+  };
+  const cvdHTML = c => !c ? '<span class="m">N/D</span>' : c.recent10 > 0 ? '<span class="g">Positivo</span>' : '<span class="r">Negativo</span>';
+
+  $('tecnico-content').innerHTML = `
+    <table>
+      <tr><th>Indicador</th><th>1D</th><th>4H</th><th>1H</th></tr>
+      <tr><td>EMA 50</td>
+          <td>${p(i1d?.ema50)}${dir(i1d?.ema50, price)}</td>
+          <td>${p(i4h?.ema50)}${dir(i4h?.ema50, price)}</td>
+          <td>${p(i1h?.ema50)}${dir(i1h?.ema50, price)}</td></tr>
+      <tr><td>EMA 200</td>
+          <td>${p(i1d?.ema200)}${dir(i1d?.ema200, price)}</td>
+          <td>${p(i4h?.ema200)}${dir(i4h?.ema200, price)}</td>
+          <td>${p(i1h?.ema200)}${dir(i1h?.ema200, price)}</td></tr>
+      <tr><td>MACD</td><td>${macdHTML(i1d?.macd)}</td><td>${macdHTML(i4h?.macd)}</td><td>${macdHTML(i1h?.macd)}</td></tr>
+      <tr><td>RSI</td><td>${rsiHTML(i1d?.rsi)}</td><td>${rsiHTML(i4h?.rsi)}</td><td>${rsiHTML(i1h?.rsi)}</td></tr>
+      <tr><td>ATR</td>
+          <td class="m">${i1d?.atr ? '$'+fmt(i1d.atr,0) : 'N/D'}</td>
+          <td class="m">${i4h?.atr ? '$'+fmt(i4h.atr,0) : 'N/D'}</td>
+          <td class="m">${i1h?.atr ? '$'+fmt(i1h.atr,0) : 'N/D'}</td></tr>
+      <tr><td>CVD (10v)</td><td>${cvdHTML(i1d?.cvd)}</td><td>${cvdHTML(i4h?.cvd)}</td><td>${cvdHTML(i1h?.cvd)}</td></tr>
+      <tr><td>POC</td>
+          <td class="b">${i1d?.poc != null ? '$'+fmt(i1d.poc)+'–'+fmt(i1d.poc+1000) : 'N/D'}</td>
+          <td class="b">${i4h?.poc != null ? '$'+fmt(i4h.poc)+'–'+fmt(i4h.poc+1000) : 'N/D'}</td>
+          <td class="b">${i1h?.poc != null ? '$'+fmt(i1h.poc)+'–'+fmt(i1h.poc+1000) : 'N/D'}</td></tr>
+      <tr><td>Soporte (20v)</td>
+          <td class="g">${i1d ? '$'+fmt(i1d.support) : 'N/D'}</td>
+          <td class="g">${i4h ? '$'+fmt(i4h.support) : 'N/D'}</td>
+          <td class="g">${i1h ? '$'+fmt(i1h.support) : 'N/D'}</td></tr>
+      <tr><td>Resistencia (20v)</td>
+          <td class="r">${i1d ? '$'+fmt(i1d.resistance) : 'N/D'}</td>
+          <td class="r">${i4h ? '$'+fmt(i4h.resistance) : 'N/D'}</td>
+          <td class="r">${i1h ? '$'+fmt(i1h.resistance) : 'N/D'}</td></tr>
+    </table>`;
+}
+
+function renderDerivados(premium, oi, oiHist) {
+  const fr    = premium ? +premium.lastFundingRate : null;
+  const frPct = fr != null ? fr * 100 : null;
+  const frColor = frPct == null ? 'm' : frPct < -0.05 ? 'g' : frPct < 0 ? 'g' : frPct > 0.05 ? 'r' : 'y';
+  const frLabel = frPct == null ? 'N/D' : frPct < 0 ? 'Shorts pagando — contrarian alcista' : 'Longs pagando';
+
+  const nf = premium ? new Date(premium.nextFundingTime) : null;
+  const nfStr = nf ? nf.toUTCString().slice(17,22) + ' UTC' : 'N/D';
+
+  const oiBTC = oi ? +oi.openInterest : null;
+  const mark  = premium ? +premium.markPrice : null;
+  const oiUSD = oiBTC && mark ? (oiBTC * mark / 1e9).toFixed(2) + 'B' : '';
+
+  let oiTrend = '<span class="m">N/D</span>';
+  if (oiHist?.length >= 2) {
+    const first = +oiHist[0].sumOpenInterest;
+    const last  = +oiHist[oiHist.length-1].sumOpenInterest;
+    const pct   = (last - first) / first * 100;
+    oiTrend = `<span class="${pct >= 0 ? 'g' : 'r'}">${pct >= 0 ? '▲' : '▼'} ${Math.abs(pct).toFixed(1)}%</span> en 24H`;
+  }
+
+  $('derivados-content').innerHTML = `
+    <table>
+      <tr><th>Indicador</th><th>Valor</th><th>Lectura</th></tr>
+      <tr><td>Funding Rate</td>
+          <td class="${frColor}">${frPct != null ? frPct.toFixed(4)+'%' : 'N/D'}</td>
+          <td class="${frColor}">${frLabel}</td></tr>
+      <tr><td>Próximo funding</td><td>${nfStr}</td><td class="m">—</td></tr>
+      <tr><td>Open Interest</td>
+          <td class="b">${oiBTC ? fmt(oiBTC,0)+' BTC' : 'N/D'}</td>
+          <td class="b">${oiUSD ? '$'+oiUSD : ''}</td></tr>
+      <tr><td>OI tendencia 24H</td><td colspan="2">${oiTrend}</td></tr>
+      <tr><td>Liq. Longs / Shorts</td>
+          <td colspan="2" class="m">Añadir manualmente desde Coinglass</td></tr>
+    </table>`;
+}
+
+function renderSentimiento(fng) {
+  if (!fng) { $('sentimiento-content').innerHTML = '<span class="r">Error</span>'; return; }
+  const v = +fng.data[0].value;
+  const lbl = { 'Extreme Fear':'Miedo Extremo','Fear':'Miedo','Neutral':'Neutral','Greed':'Codicia','Extreme Greed':'Codicia Extrema' }[fng.data[0].value_classification] || fng.data[0].value_classification;
+  const col = v <= 25 ? '#ff4444' : v <= 45 ? '#ff8800' : v <= 55 ? '#ffcc00' : v <= 75 ? '#88dd00' : '#00ff88';
+  const cls = v <= 45 ? 'r' : v <= 55 ? 'y' : 'g';
+  $('sentimiento-content').innerHTML = `
+    <div class="fng-display">
+      <div>
+        <div class="fng-number" style="color:${col}">${v}</div>
+        <div class="fng-label">/100</div>
+      </div>
+      <div style="flex:1">
+        <div class="fng-bar-wrap">
+          <div class="fng-bar" style="width:${v}%;background:${col}"></div>
+        </div>
+        <div class="fng-label" style="margin-top:6px"><span class="${cls}">${lbl}</span></div>
+      </div>
+    </div>`;
+}
+
+function renderSesgo(seg) {
+  const boxCls = seg.label === 'ALCISTA' ? 'sesgo-alcista' : seg.label === 'BAJISTA' ? 'sesgo-bajista' : 'sesgo-neutral';
+  const whyHtml = seg.why.length ? `<div style="margin-top:8px;color:var(--muted);font-size:0.82em">${seg.why.join(' · ')}</div>` : '';
+  $('sesgo-content').innerHTML = `
+    <div class="sesgo-box ${boxCls}">
+      <span class="${seg.color}"><strong>${seg.label}</strong></span>
+      <span class="m" style="margin-left:10px;font-size:0.85em">score ${seg.score > 0 ? '+' : ''}${seg.score}</span>
+      ${whyHtml}
+    </div>`;
+}
+
+function renderTrade(t) {
+  if (!t) {
+    $('trade-content').innerHTML = `<div class="trade-box"><span class="m">Sin setup definido — esperar confirmación de dirección</span></div>`;
+    return;
+  }
+  const tagDir  = t.dir === 'Long' ? 'tag-long' : 'tag-short';
+  const convCls = t.conv === 'Alta' ? 'g' : t.conv === 'Media' ? 'y' : 'm';
+  $('trade-content').innerHTML = `
+    <div class="trade-box">
+      <span class="tag ${tagDir}">${t.dir.toUpperCase()}</span>
+      <span class="tag tag-neutral">INTRADAY</span>
+      <span class="tag tag-blue">${t.conv.toUpperCase()}</span>
+      <table>
+        <tr><td style="color:var(--muted);width:120px">Entrada</td><td class="b">$${fmt(t.entry)}</td></tr>
+        <tr><td style="color:var(--muted)">Stop Loss</td><td class="r">$${fmt(t.sl)} <span class="m">(2×ATR 1H)</span></td></tr>
+        <tr><td style="color:var(--muted)">TP1</td><td class="g">$${fmt(t.tp1)} &mdash; R:R 1.5:1</td></tr>
+        <tr><td style="color:var(--muted)">TP2</td><td class="g">$${fmt(t.tp2)} &mdash; R:R 2.5:1</td></tr>
+        <tr><td style="color:var(--muted)">Conviction</td><td class="${convCls}">${t.conv}</td></tr>
+        <tr><td style="color:var(--muted)">Invalidación</td><td>Cierre 1H ${t.dir === 'Long' ? 'bajo' : 'sobre'} <span class="r">$${fmt(t.sl)}</span></td></tr>
+      </table>
+    </div>`;
+}
+
+// ─────────────────────────────────────────────
+// COUNTDOWN
+// ─────────────────────────────────────────────
+let cdInterval;
+function startCountdown(secs) {
+  clearInterval(cdInterval);
+  let rem = secs;
+  cdInterval = setInterval(() => {
+    rem--;
+    if (rem <= 0) { clearInterval(cdInterval); return; }
+    $('countdown').textContent = `${Math.floor(rem/60)}:${String(rem%60).padStart(2,'0')}`;
+  }, 1000);
+}
+
+// ─────────────────────────────────────────────
+// MAIN
+// ─────────────────────────────────────────────
+async function update() {
+  const now = new Date();
+  $('timestamp').textContent =
+    now.toLocaleDateString('es-ES', { weekday:'short', day:'2-digit', month:'short', year:'numeric' })
+    + ' ' + now.toLocaleTimeString('es-ES', { hour:'2-digit', minute:'2-digit' });
+
+  startCountdown(300);
+
+  const d = await loadData();
+  const price = d.ticker ? +d.ticker.lastPrice : null;
+  const i1d   = d.k1d ? processKlines(d.k1d) : null;
+  const i4h   = d.k4h ? processKlines(d.k4h) : null;
+  const i1h   = d.k1h ? processKlines(d.k1h) : null;
+  const fr    = d.premium ? +d.premium.lastFundingRate : null;
+  const fngV  = d.fng ? +d.fng.data[0].value : null;
+
+  const seg   = sesgoCalc(price, i1d, i4h, fr, fngV);
+  const trade = tradeCalc(seg.label, seg.score, price, i1h?.atr);
+
+  renderPrecio(d.ticker, i1d);
+  renderMacro(d.sp, d.dxy, d.gold);
+  renderTecnico(price, i1d, i4h, i1h);
+  renderDerivados(d.premium, d.oi, d.oiHist);
+  renderSentimiento(d.fng);
+  renderSesgo(seg);
+  renderTrade(trade);
+
+  setTimeout(update, 5 * 60 * 1000);
+}
+
+update();
+</script>
+</body>
+</html>
