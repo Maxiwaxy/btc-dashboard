@@ -306,28 +306,41 @@ function processKlines(candles) {
 const B  = 'https://api.binance.com/api/v3';
 const BF = 'https://fapi.binance.com';
 
-async function get(url) {
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(r.status);
-  return r.json();
+async function get(url, timeout = 8000) {
+  const ctrl = new AbortController();
+  const id = setTimeout(() => ctrl.abort(), timeout);
+  try {
+    const r = await fetch(url, { signal: ctrl.signal });
+    if (!r.ok) throw new Error(r.status);
+    return r.json();
+  } finally {
+    clearTimeout(id);
+  }
 }
 
 async function getYahoo(symbol) {
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=2d`;
+  const base = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=2d`;
+
   const parse = data => {
-    const closes = data.chart.result[0].indicators.quote[0].close.filter(Boolean);
-    if (closes.length < 2) return null;
+    const result = data?.chart?.result?.[0];
+    if (!result) throw new Error('no result');
+    const closes = result.indicators.quote[0].close.filter(v => v != null);
+    if (closes.length < 2) throw new Error('insufficient data');
     const prev = closes[closes.length - 2], curr = closes[closes.length - 1];
     return { price: curr, change: (curr - prev) / prev * 100 };
   };
-  try { return parse(await get(url)); }
-  catch {
-    try {
-      const proxy = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
-      const w = await get(proxy);
-      return parse(JSON.parse(w.contents));
-    } catch { return null; }
-  }
+
+  // 1. Direct
+  try { return parse(await get(base, 5000)); } catch {}
+  // 2. corsproxy.io (devuelve el JSON directo)
+  try { return parse(await get(`https://corsproxy.io/?url=${encodeURIComponent(base)}`, 8000)); } catch {}
+  // 3. allorigins (devuelve wrapper con .contents)
+  try {
+    const w = await get(`https://api.allorigins.win/get?url=${encodeURIComponent(base)}`, 8000);
+    return parse(JSON.parse(w.contents));
+  } catch {}
+
+  return null;
 }
 
 async function loadData() {
