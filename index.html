@@ -322,7 +322,7 @@ async function get(url, timeout = 8000) {
 function getMacroKey() { return localStorage.getItem('td_apikey') || 'cfdaa5ff370143f6ad15623d2c422911'; }
 
 async function fetchTD(symbol) {
-  // Llamada individual — el batch falla para activos de distinto tipo
+  // Twelve Data — llamada individual (el batch falla para activos mixtos)
   const key = getMacroKey();
   if (!key) return null;
   try {
@@ -332,15 +332,27 @@ async function fetchTD(symbol) {
   } catch { return null; }
 }
 
+async function fetchSPX() {
+  // Stooq: free, sin key, devuelve SPX real (~7000) igual que TradingView
+  try {
+    const d = await get('https://stooq.com/q/l/?s=%5Espx&f=sd2ohlcv&h&e=json', 8000);
+    const s = d?.symbols?.[0];
+    if (!s?.close) return null;
+    // % cambio intradiario (apertura → cierre actual)
+    const change = s.open ? (s.close - s.open) / s.open * 100 : null;
+    return { price: s.close, change };
+  } catch { return null; }
+}
+
 async function fetchMacro() {
-  const [spy, gold, eurusd] = await Promise.all([
-    fetchTD('SPY'),
+  const [spx, gold, eurusd] = await Promise.all([
+    fetchSPX(),
     fetchTD('XAU/USD'),
     fetchTD('EUR/USD'),
   ]);
   // EUR/USD inverted = DXY proxy: EUR/USD sube → USD débil → DXY baja
   const dxy = eurusd ? { price: eurusd.price, change: -eurusd.change } : null;
-  return { sp500: spy, gold, dxy };
+  return { sp500: spx, gold, dxy };
 }
 
 window.saveMacroKeyAndRefresh = function() {
