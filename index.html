@@ -321,23 +321,26 @@ async function get(url, timeout = 8000) {
 // ─── MACRO: Twelve Data (free tier, 800 req/día) ───────────
 function getMacroKey() { return localStorage.getItem('td_apikey') || 'cfdaa5ff370143f6ad15623d2c422911'; }
 
-async function fetchMacro() {
+async function fetchTD(symbol) {
+  // Llamada individual — el batch falla para activos de distinto tipo
   const key = getMacroKey();
   if (!key) return null;
   try {
-    // SPY = ETF del S&P500 (free tier) | XAU/USD = Oro (forex, free tier) | EUR/USD = proxy inverso DXY (forex, free tier)
-    const url = `https://api.twelvedata.com/quote?symbol=SPY%2CXAU%2FUSD%2CEUR%2FUSD&apikey=${key}&outputsize=1`;
-    const d   = await get(url, 10000);
-    const toQ = sym => {
-      const s = d[sym];
-      if (!s || s.status === 'error') return null;
-      return { price: +s.close, change: +s.percent_change };
-    };
-    const eurusd = toQ('EUR/USD');
-    // DXY es inverso de EUR/USD: si EUR/USD sube, DXY baja (USD se debilita)
-    const dxy = eurusd ? { price: eurusd.price, change: -eurusd.change, isEURUSD: true } : null;
-    return { sp500: toQ('SPY'), gold: toQ('XAU/USD'), dxy };
+    const d = await get(`https://api.twelvedata.com/quote?symbol=${encodeURIComponent(symbol)}&apikey=${key}`, 8000);
+    if (!d || d.status === 'error' || d.code) return null;
+    return { price: +d.close, change: +d.percent_change };
   } catch { return null; }
+}
+
+async function fetchMacro() {
+  const [spy, gold, eurusd] = await Promise.all([
+    fetchTD('SPY'),
+    fetchTD('XAU/USD'),
+    fetchTD('EUR/USD'),
+  ]);
+  // EUR/USD inverted = DXY proxy: EUR/USD sube → USD débil → DXY baja
+  const dxy = eurusd ? { price: eurusd.price, change: -eurusd.change } : null;
+  return { sp500: spy, gold, dxy };
 }
 
 window.saveMacroKeyAndRefresh = function() {
