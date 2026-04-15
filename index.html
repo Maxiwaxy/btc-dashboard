@@ -319,7 +319,7 @@ async function get(url, timeout = 8000) {
 }
 
 // ─── MACRO: Twelve Data (free tier, 800 req/día) ───────────
-function getMacroKey() { return localStorage.getItem('td_apikey') || ''; }
+function getMacroKey() { return localStorage.getItem('td_apikey') || 'cfdaa5ff370143f6ad15623d2c422911'; }
 
 async function fetchMacro() {
   const key = getMacroKey();
