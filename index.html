@@ -332,27 +332,34 @@ async function fetchTD(symbol) {
   } catch { return null; }
 }
 
-async function fetchStooq(symbol) {
-  // Stooq: free, sin key, CORS-nativo
+async function fetchFrankfurter() {
+  // Frankfurter.dev: ECB rates, free, sin key, CORS-nativo
+  // Devuelve EUR/USD de hoy y ayer para calcular % cambio diario
   try {
-    const d = await get(`https://stooq.com/q/l/?s=${encodeURIComponent(symbol)}&f=sd2ohlcv&h&e=json`, 8000);
-    const s = d?.symbols?.[0];
-    if (!s?.close) return null;
-    const change = s.open ? (s.close - s.open) / s.open * 100 : null;
-    return { price: s.close, change };
+    const today = new Date().toISOString().slice(0, 10);
+    const yday  = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    const d = await get(`https://api.frankfurter.dev/v1/${yday}..?from=EUR&to=USD`, 8000);
+    const dates = Object.keys(d?.rates || {}).sort();
+    if (dates.length < 1) return null;
+    const latest = d.rates[dates[dates.length - 1]]?.USD;
+    const prev   = dates.length >= 2 ? d.rates[dates[dates.length - 2]]?.USD : null;
+    if (!latest) return null;
+    const change = prev ? (latest - prev) / prev * 100 : null;
+    return { price: latest, change };
   } catch { return null; }
 }
 
 async function fetchMacro() {
-  // SPX y EUR/USD → Stooq (sin API key, sin rate limit)
-  // Gold → Twelve Data (Stooq no tiene XAU/USD fiable)
-  const [spx, gold, eurusd] = await Promise.all([
-    fetchStooq('^spx'),
+  // SPX → Twelve Data SPY ×10 (SPY % change = SPX % change; precio aprox. error <0.3%)
+  // Gold → Twelve Data XAU/USD
+  // DXY → Frankfurter.dev EUR/USD invertido (CORS-nativo, sin key, tasas ECB diarias)
+  const [spy, gold, eurusd] = await Promise.all([
+    fetchTD('SPY'),
     fetchTD('XAU/USD'),
-    fetchStooq('eurusd'),
+    fetchFrankfurter(),
   ]);
-  // EUR/USD inverted = DXY proxy: EUR/USD sube → USD débil → DXY baja
-  const dxy = eurusd ? { price: eurusd.price, change: -eurusd.change } : null;
+  const spx = spy ? { price: spy.price * 10, change: spy.change } : null;
+  const dxy = eurusd ? { price: eurusd.price, change: eurusd.change !== null ? -eurusd.change : null } : null;
   return { sp500: spx, gold, dxy };
 }
 
