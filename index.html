@@ -325,14 +325,18 @@ async function fetchMacro() {
   const key = getMacroKey();
   if (!key) return null;
   try {
-    const url = `https://api.twelvedata.com/quote?symbol=SPX%2CXAU%2FUSD%2CDXY&apikey=${key}&outputsize=1`;
+    // SPY = ETF del S&P500 (free tier) | XAU/USD = Oro (forex, free tier) | EUR/USD = proxy inverso DXY (forex, free tier)
+    const url = `https://api.twelvedata.com/quote?symbol=SPY%2CXAU%2FUSD%2CEUR%2FUSD&apikey=${key}&outputsize=1`;
     const d   = await get(url, 10000);
     const toQ = sym => {
       const s = d[sym];
       if (!s || s.status === 'error') return null;
       return { price: +s.close, change: +s.percent_change };
     };
-    return { sp500: toQ('SPX'), gold: toQ('XAU/USD'), dxy: toQ('DXY') };
+    const eurusd = toQ('EUR/USD');
+    // DXY es inverso de EUR/USD: si EUR/USD sube, DXY baja (USD se debilita)
+    const dxy = eurusd ? { price: eurusd.price, change: -eurusd.change, isEURUSD: true } : null;
+    return { sp500: toQ('SPY'), gold: toQ('XAU/USD'), dxy };
   } catch { return null; }
 }
 
@@ -464,7 +468,7 @@ function renderMacro(sp, dxy, gold) {
     const read = () => {
       if (!d) return '<span class="m">N/D</span>';
       if (name === 'S&amp;P500') return d.change >= 0 ? '<span class="g">Risk-on</span>'  : '<span class="r">Risk-off</span>';
-      if (name === 'DXY')        return Math.abs(d.change) < 0.2 ? '<span class="m">Plano</span>' : d.change > 0 ? '<span class="r">USD fuerte</span>' : '<span class="g">USD débil</span>';
+      if (name === 'DXY')        return Math.abs(d.change) < 0.2 ? '<span class="m">Plano</span>' : d.change > 0 ? '<span class="r">USD fuerte</span>' : '<span class="g">USD débil</span>'; // change ya viene invertido desde fetchMacro
       if (name === 'Oro')        return d.change > 0.5 ? '<span class="r">Flight-to-safety</span>' : '<span class="m">Estable</span>';
     };
     return `<tr><td>${name}</td>
@@ -476,9 +480,9 @@ function renderMacro(sp, dxy, gold) {
   $('macro-content').innerHTML = `
     <table>
       <tr><th>Activo</th><th>Precio</th><th>Var 24h</th><th>Lectura</th></tr>
-      ${row('S&amp;P500', sp,   p => fmt(p, 0))}
-      ${row('DXY',        dxy,  p => fmt(p, 2))}
-      ${row('Oro',        gold, p => '$' + fmt(p, 0))}
+      ${row('S&amp;P500 <span style="color:var(--muted);font-size:0.85em">(SPY)</span>', sp,   p => '$' + fmt(p, 2))}
+      ${row('DXY <span style="color:var(--muted);font-size:0.85em">(EUR/USD inv.)</span>', dxy,  p => fmt(p, 4))}
+      ${row('Oro',        gold, p => '$' + fmt(p, 2))}
     </table>
     <div style="text-align:right;margin-top:4px">
       <span onclick="resetMacroKey()"
