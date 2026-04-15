@@ -332,23 +332,24 @@ async function fetchTD(symbol) {
   } catch { return null; }
 }
 
-async function fetchSPX() {
-  // Stooq: free, sin key, devuelve SPX real (~7000) igual que TradingView
+async function fetchStooq(symbol) {
+  // Stooq: free, sin key, CORS-nativo
   try {
-    const d = await get('https://stooq.com/q/l/?s=%5Espx&f=sd2ohlcv&h&e=json', 8000);
+    const d = await get(`https://stooq.com/q/l/?s=${encodeURIComponent(symbol)}&f=sd2ohlcv&h&e=json`, 8000);
     const s = d?.symbols?.[0];
     if (!s?.close) return null;
-    // % cambio intradiario (apertura → cierre actual)
     const change = s.open ? (s.close - s.open) / s.open * 100 : null;
     return { price: s.close, change };
   } catch { return null; }
 }
 
 async function fetchMacro() {
+  // SPX y EUR/USD → Stooq (sin API key, sin rate limit)
+  // Gold → Twelve Data (Stooq no tiene XAU/USD fiable)
   const [spx, gold, eurusd] = await Promise.all([
-    fetchSPX(),
+    fetchStooq('^spx'),
     fetchTD('XAU/USD'),
-    fetchTD('EUR/USD'),
+    fetchStooq('eurusd'),
   ]);
   // EUR/USD inverted = DXY proxy: EUR/USD sube → USD débil → DXY baja
   const dxy = eurusd ? { price: eurusd.price, change: -eurusd.change } : null;
