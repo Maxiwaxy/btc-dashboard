@@ -319,27 +319,33 @@ async function get(url, timeout = 8000) {
 }
 
 async function getYahoo(symbol) {
-  const base = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=2d`;
+  const base  = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=2d`;
+  const base2 = `https://query2.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=2d`;
+  const enc   = encodeURIComponent(base);
 
   const parse = data => {
     const result = data?.chart?.result?.[0];
     if (!result) throw new Error('no result');
     const closes = result.indicators.quote[0].close.filter(v => v != null);
-    if (closes.length < 2) throw new Error('insufficient data');
+    if (closes.length < 2) throw new Error('insufficient');
     const prev = closes[closes.length - 2], curr = closes[closes.length - 1];
     return { price: curr, change: (curr - prev) / prev * 100 };
   };
 
-  // 1. Direct
-  try { return parse(await get(base, 5000)); } catch {}
-  // 2. corsproxy.io (devuelve el JSON directo)
-  try { return parse(await get(`https://corsproxy.io/?url=${encodeURIComponent(base)}`, 8000)); } catch {}
-  // 3. allorigins (devuelve wrapper con .contents)
-  try {
-    const w = await get(`https://api.allorigins.win/get?url=${encodeURIComponent(base)}`, 8000);
-    return parse(JSON.parse(w.contents));
-  } catch {}
+  const attempts = [
+    () => get(base, 4000),
+    () => get(base2, 4000),
+    // corsproxy.io: formato correcto es ?URL sin "url="
+    () => get(`https://corsproxy.io/?${enc}`, 8000),
+    // codetabs: otro proxy fiable
+    () => get(`https://api.codetabs.com/v1/proxy?quest=${enc}`, 8000),
+    // allorigins: wrappea la respuesta en .contents
+    async () => { const w = await get(`https://api.allorigins.win/get?url=${enc}`, 8000); return JSON.parse(w.contents); },
+  ];
 
+  for (const fn of attempts) {
+    try { return parse(await fn()); } catch {}
+  }
   return null;
 }
 
