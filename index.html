@@ -318,39 +318,35 @@ async function get(url, timeout = 8000) {
   }
 }
 
-async function getYahoo(symbol) {
-  const base  = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=2d`;
-  const base2 = `https://query2.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=2d`;
-  const enc   = encodeURIComponent(base);
+// ─── MACRO: Twelve Data (free tier, 800 req/día) ───────────
+function getMacroKey() { return localStorage.getItem('td_apikey') || ''; }
 
-  const parse = data => {
-    const result = data?.chart?.result?.[0];
-    if (!result) throw new Error('no result');
-    const closes = result.indicators.quote[0].close.filter(v => v != null);
-    if (closes.length < 2) throw new Error('insufficient');
-    const prev = closes[closes.length - 2], curr = closes[closes.length - 1];
-    return { price: curr, change: (curr - prev) / prev * 100 };
-  };
-
-  const attempts = [
-    () => get(base, 4000),
-    () => get(base2, 4000),
-    // corsproxy.io: formato correcto es ?URL sin "url="
-    () => get(`https://corsproxy.io/?${enc}`, 8000),
-    // codetabs: otro proxy fiable
-    () => get(`https://api.codetabs.com/v1/proxy?quest=${enc}`, 8000),
-    // allorigins: wrappea la respuesta en .contents
-    async () => { const w = await get(`https://api.allorigins.win/get?url=${enc}`, 8000); return JSON.parse(w.contents); },
-  ];
-
-  for (const fn of attempts) {
-    try { return parse(await fn()); } catch {}
-  }
-  return null;
+async function fetchMacro() {
+  const key = getMacroKey();
+  if (!key) return null;
+  try {
+    const url = `https://api.twelvedata.com/quote?symbol=SPX%2CXAU%2FUSD%2CDXY&apikey=${key}&outputsize=1`;
+    const d   = await get(url, 10000);
+    const toQ = sym => {
+      const s = d[sym];
+      if (!s || s.status === 'error') return null;
+      return { price: +s.close, change: +s.percent_change };
+    };
+    return { sp500: toQ('SPX'), gold: toQ('XAU/USD'), dxy: toQ('DXY') };
+  } catch { return null; }
 }
 
+window.saveMacroKeyAndRefresh = function() {
+  const v = (document.getElementById('td-key-input') || {}).value;
+  if (v?.trim()) { localStorage.setItem('td_apikey', v.trim()); update(); }
+};
+
+window.resetMacroKey = function() {
+  localStorage.removeItem('td_apikey'); update();
+};
+
 async function loadData() {
-  const [ticker, k1d, k4h, k1h, premium, oi, oiHist, fng, sp, dxy, gold] =
+  const [ticker, k1d, k4h, k1h, premium, oi, oiHist, fng, macro] =
     await Promise.allSettled([
       get(`${B}/ticker/24hr?symbol=BTCUSDT`),
       get(`${B}/klines?symbol=BTCUSDT&interval=1d&limit=200`),
@@ -360,14 +356,13 @@ async function loadData() {
       get(`${BF}/fapi/v1/openInterest?symbol=BTCUSDT`),
       get(`${BF}/futures/data/openInterestHist?symbol=BTCUSDT&period=1h&limit=24`),
       get('https://api.alternative.me/fng/?limit=1'),
-      getYahoo('%5EGSPC'),
-      getYahoo('DX-Y.NYB'),
-      getYahoo('GC%3DF'),
+      fetchMacro(),
     ]);
   const v = r => r.status === 'fulfilled' ? r.value : null;
+  const m = v(macro) || {};
   return { ticker: v(ticker), k1d: v(k1d), k4h: v(k4h), k1h: v(k1h),
            premium: v(premium), oi: v(oi), oiHist: v(oiHist), fng: v(fng),
-           sp: v(sp), dxy: v(dxy), gold: v(gold) };
+           sp: m.sp500 || null, dxy: m.dxy || null, gold: m.gold || null };
 }
 
 // ─────────────────────────────────────────────
@@ -444,22 +439,53 @@ function renderPrecio(ticker, i1d) {
 }
 
 function renderMacro(sp, dxy, gold) {
-  const row = (name, d, price) => {
+  if (!getMacroKey()) {
+    $('macro-content').innerHTML = `
+      <div style="font-size:0.83em;color:var(--muted);line-height:1.7;margin-bottom:10px">
+        Necesitas una API key gratuita de <span class="b">Twelve Data</span><br>
+        <span style="font-size:0.9em">1. Ve a <span class="b">twelvedata.com</span> → Sign Up (gratis)<br>
+        2. En tu dashboard copia la API Key<br>
+        3. Pégala aquí — se guarda en tu navegador</span>
+      </div>
+      <div style="display:flex;gap:8px">
+        <input id="td-key-input" placeholder="Pega tu API key aquí"
+          style="flex:1;background:var(--surface);border:1px solid var(--border);color:var(--text);
+                 padding:6px 10px;border-radius:4px;font-family:monospace;font-size:0.83em;outline:none">
+        <button onclick="saveMacroKeyAndRefresh()"
+          style="background:var(--blue);color:#000;border:none;padding:6px 14px;
+                 border-radius:4px;cursor:pointer;font-weight:bold;font-size:0.83em">
+          Guardar
+        </button>
+      </div>`;
+    return;
+  }
+
+  const row = (name, d, fmt2) => {
     const read = () => {
       if (!d) return '<span class="m">N/D</span>';
-      if (name === 'S&amp;P500') return d.change >= 0 ? '<span class="g">Risk-on</span>' : '<span class="r">Risk-off</span>';
-      if (name === 'DXY')    return Math.abs(d.change) < 0.2 ? '<span class="m">Plano</span>' : d.change > 0 ? '<span class="r">USD fuerte</span>' : '<span class="g">USD débil</span>';
-      if (name === 'Oro')    return d.change > 0.5 ? '<span class="r">Flight-to-safety</span>' : '<span class="m">Estable</span>';
+      if (name === 'S&amp;P500') return d.change >= 0 ? '<span class="g">Risk-on</span>'  : '<span class="r">Risk-off</span>';
+      if (name === 'DXY')        return Math.abs(d.change) < 0.2 ? '<span class="m">Plano</span>' : d.change > 0 ? '<span class="r">USD fuerte</span>' : '<span class="g">USD débil</span>';
+      if (name === 'Oro')        return d.change > 0.5 ? '<span class="r">Flight-to-safety</span>' : '<span class="m">Estable</span>';
     };
-    return `<tr><td>${name}</td><td class="b">${d ? price(d.price) : '<span class="m">N/D</span>'}</td><td class="${d ? clr(d.change) : 'm'}">${d ? fmtP(d.change) : 'N/D'}</td><td>${read()}</td></tr>`;
+    return `<tr><td>${name}</td>
+      <td class="b">${d ? fmt2(d.price) : '<span class="m">N/D</span>'}</td>
+      <td class="${d ? clr(d.change) : 'm'}">${d ? fmtP(d.change) : 'N/D'}</td>
+      <td>${read()}</td></tr>`;
   };
+
   $('macro-content').innerHTML = `
     <table>
       <tr><th>Activo</th><th>Precio</th><th>Var 24h</th><th>Lectura</th></tr>
-      ${row('S&amp;P500', sp,  p => fmt(p, 0))}
-      ${row('DXY',        dxy, p => fmt(p, 2))}
-      ${row('Oro',        gold,p => '$' + fmt(p, 0))}
-    </table>`;
+      ${row('S&amp;P500', sp,   p => fmt(p, 0))}
+      ${row('DXY',        dxy,  p => fmt(p, 2))}
+      ${row('Oro',        gold, p => '$' + fmt(p, 0))}
+    </table>
+    <div style="text-align:right;margin-top:4px">
+      <span onclick="resetMacroKey()"
+        style="color:var(--muted);font-size:0.75em;cursor:pointer;text-decoration:underline">
+        cambiar API key
+      </span>
+    </div>`;
 }
 
 function renderTecnico(price, i1d, i4h, i1h) {
