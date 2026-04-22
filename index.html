@@ -234,11 +234,15 @@ function lastEMA(values, period) {
 }
 
 function calcRSI(closes, period = 14) {
-  if (closes.length < period + 1) return null;
-  const slice = closes.slice(-(period + 1));
-  const diffs = slice.slice(1).map((c, i) => c - slice[i]);
-  const avgGain = diffs.reduce((a, d) => a + Math.max(d, 0), 0) / period;
-  const avgLoss = diffs.reduce((a, d) => a + Math.abs(Math.min(d, 0)), 0) / period;
+  // Wilder's RSI — seed con SMA, luego SMMA sobre todos los datos
+  if (closes.length < period * 2 + 1) return null;
+  const diffs = closes.slice(1).map((c, i) => c - closes[i]);
+  let avgGain = diffs.slice(0, period).reduce((a, d) => a + Math.max(d, 0), 0) / period;
+  let avgLoss = diffs.slice(0, period).reduce((a, d) => a + Math.abs(Math.min(d, 0)), 0) / period;
+  for (let i = period; i < diffs.length; i++) {
+    avgGain = (avgGain * (period - 1) + Math.max(diffs[i], 0)) / period;
+    avgLoss = (avgLoss * (period - 1) + Math.abs(Math.min(diffs[i], 0))) / period;
+  }
   if (avgLoss === 0) return 100;
   return 100 - 100 / (1 + avgGain / avgLoss);
 }
@@ -283,7 +287,7 @@ function calcPOC(candles, bucket = 1000) {
   return best ? +best[0] : null;
 }
 
-function processKlines(candles) {
+function processKlines(candles, pocBucket = 1000) {
   const closes = candles.map(c => +c[4]);
   const recent20 = candles.slice(-20);
   return {
@@ -293,7 +297,8 @@ function processKlines(candles) {
     atr:        calcATR(candles),
     macd:       calcMACD(closes),
     cvd:        calcCVD(candles),
-    poc:        calcPOC(candles),
+    poc:        calcPOC(candles, pocBucket),
+    pocBucket,
     support:    Math.min(...recent20.map(c => +c[3])),
     resistance: Math.max(...recent20.map(c => +c[2])),
     close7dAgo: candles.length >= 8 ? +candles[candles.length - 8][4] : null,
@@ -305,6 +310,8 @@ function processKlines(candles) {
 // ─────────────────────────────────────────────
 const B  = 'https://api.binance.com/api/v3';
 const BF = 'https://fapi.binance.com';
+const PROXY = 'https://corsproxy.io/?url=';
+const proxy = url => `${PROXY}${encodeURIComponent(url)}`;
 
 async function get(url, timeout = 8000) {
   const ctrl = new AbortController();
@@ -319,7 +326,7 @@ async function get(url, timeout = 8000) {
 }
 
 // ─── MACRO: Twelve Data (free tier, 800 req/día) ───────────
-function getMacroKey() { return localStorage.getItem('td_apikey') || 'cfdaa5ff370143f6ad15623d2c422911'; }
+function getMacroKey() { return localStorage.getItem('td_apikey') || null; }
 
 async function fetchTD(symbol) {
   // Twelve Data — llamada individual (el batch falla para activos mixtos)
@@ -378,11 +385,11 @@ async function loadData() {
       get(`${B}/ticker/24hr?symbol=BTCUSDT`),
       get(`${B}/klines?symbol=BTCUSDT&interval=1d&limit=200`),
       get(`${B}/klines?symbol=BTCUSDT&interval=4h&limit=200`),
-      get(`${B}/klines?symbol=BTCUSDT&interval=1h&limit=100`),
-      get(`${BF}/fapi/v1/premiumIndex?symbol=BTCUSDT`),
-      get(`${BF}/fapi/v1/openInterest?symbol=BTCUSDT`),
-      get(`${BF}/futures/data/openInterestHist?symbol=BTCUSDT&period=1h&limit=24`),
-      get('https://api.alternative.me/fng/?limit=1'),
+      get(`${B}/klines?symbol=BTCUSDT&interval=1h&limit=300`),
+      get(proxy(`${BF}/fapi/v1/premiumIndex?symbol=BTCUSDT`)),
+      get(proxy(`${BF}/fapi/v1/openInterest?symbol=BTCUSDT`)),
+      get(proxy(`${BF}/futures/data/openInterestHist?symbol=BTCUSDT&period=1h&limit=24`)),
+      get(proxy('https://api.alternative.me/fng/?limit=1')),
       fetchMacro(),
     ]);
   const v = r => r.status === 'fulfilled' ? r.value : null;
@@ -431,17 +438,27 @@ function sesgoCalc(price, i1d, i4h, funding, fngVal) {
   return { label, score: s, color, why };
 }
 
-function tradeCalc(sesgo, score, price, atr) {
-  if (!price || !atr) return null;
+function tradeCalc(sesgo, score, price, i1d, i4h, i1h) {
+  if (!price) return null;
   const dir = sesgo === 'BAJISTA' ? 'Short' : (sesgo === 'ALCISTA' || score > 0) ? 'Long' : null;
   if (!dir) return null;
-  const entry = price;
-  const risk  = 2 * atr;
-  const sl    = dir === 'Long' ? Math.round(entry - risk) : Math.round(entry + risk);
-  const tp1   = dir === 'Long' ? Math.round(entry + 1.5 * risk) : Math.round(entry - 1.5 * risk);
-  const tp2   = dir === 'Long' ? Math.round(entry + 2.5 * risk) : Math.round(entry - 2.5 * risk);
-  const conv  = Math.abs(score) >= 6 ? 'Alta' : Math.abs(score) >= 4 ? 'Media' : 'Baja';
-  return { dir, entry, sl, tp1, tp2, conv };
+
+  // SWING si score fuerte Y el MACD 1D confirma la dirección
+  const macd1dOk = i1d?.macd && (dir === 'Long' ? i1d.macd.histogram > 0 : i1d.macd.histogram < 0);
+  const type  = (Math.abs(score) >= 5 && macd1dOk) ? 'SWING' : 'INTRADAY';
+  const atr   = type === 'SWING' ? i1d?.atr : (i4h?.atr ?? i1h?.atr);
+  const atrTF = type === 'SWING' ? '1D' : (i4h?.atr ? '4H' : '1H');
+  if (!atr) return null;
+
+  const risk      = 2 * atr;
+  const entryLow  = Math.round(price - atr * 0.25);
+  const entryHigh = Math.round(price + atr * 0.25);
+  const entryRef  = dir === 'Long' ? entryLow : entryHigh;
+  const sl   = dir === 'Long' ? Math.round(entryRef - risk) : Math.round(entryRef + risk);
+  const tp1  = dir === 'Long' ? Math.round(entryRef + 1.5 * risk) : Math.round(entryRef - 1.5 * risk);
+  const tp2  = dir === 'Long' ? Math.round(entryRef + 2.5 * risk) : Math.round(entryRef - 2.5 * risk);
+  const conv = Math.abs(score) >= 6 ? 'Alta' : Math.abs(score) >= 4 ? 'Media' : 'Baja';
+  return { dir, type, entryLow, entryHigh, sl, tp1, tp2, conv, atrTF };
 }
 
 // ─────────────────────────────────────────────
@@ -550,9 +567,9 @@ function renderTecnico(price, i1d, i4h, i1h) {
           <td class="m">${i1h?.atr ? '$'+fmt(i1h.atr,0) : 'N/D'}</td></tr>
       <tr><td>CVD (10v)</td><td>${cvdHTML(i1d?.cvd)}</td><td>${cvdHTML(i4h?.cvd)}</td><td>${cvdHTML(i1h?.cvd)}</td></tr>
       <tr><td>POC</td>
-          <td class="b">${i1d?.poc != null ? '$'+fmt(i1d.poc)+'–'+fmt(i1d.poc+1000) : 'N/D'}</td>
-          <td class="b">${i4h?.poc != null ? '$'+fmt(i4h.poc)+'–'+fmt(i4h.poc+1000) : 'N/D'}</td>
-          <td class="b">${i1h?.poc != null ? '$'+fmt(i1h.poc)+'–'+fmt(i1h.poc+1000) : 'N/D'}</td></tr>
+          <td class="b">${i1d?.poc != null ? '$'+fmt(i1d.poc)+'–'+fmt(i1d.poc+i1d.pocBucket) : 'N/D'}</td>
+          <td class="b">${i4h?.poc != null ? '$'+fmt(i4h.poc)+'–'+fmt(i4h.poc+i4h.pocBucket) : 'N/D'}</td>
+          <td class="b">${i1h?.poc != null ? '$'+fmt(i1h.poc)+'–'+fmt(i1h.poc+i1h.pocBucket) : 'N/D'}</td></tr>
       <tr><td>Soporte (20v)</td>
           <td class="g">${i1d ? '$'+fmt(i1d.support) : 'N/D'}</td>
           <td class="g">${i4h ? '$'+fmt(i4h.support) : 'N/D'}</td>
@@ -643,11 +660,11 @@ function renderTrade(t) {
   $('trade-content').innerHTML = `
     <div class="trade-box">
       <span class="tag ${tagDir}">${t.dir.toUpperCase()}</span>
-      <span class="tag tag-neutral">INTRADAY</span>
+      <span class="tag tag-neutral">${t.type}</span>
       <span class="tag tag-blue">${t.conv.toUpperCase()}</span>
       <table>
-        <tr><td style="color:var(--muted);width:120px">Entrada</td><td class="b">$${fmt(t.entry)}</td></tr>
-        <tr><td style="color:var(--muted)">Stop Loss</td><td class="r">$${fmt(t.sl)} <span class="m">(2×ATR 1H)</span></td></tr>
+        <tr><td style="color:var(--muted);width:120px">Entrada</td><td class="b">$${fmt(t.entryLow)} – $${fmt(t.entryHigh)}</td></tr>
+        <tr><td style="color:var(--muted)">Stop Loss</td><td class="r">$${fmt(t.sl)} <span class="m">(2×ATR ${t.atrTF})</span></td></tr>
         <tr><td style="color:var(--muted)">TP1</td><td class="g">$${fmt(t.tp1)} &mdash; R:R 1.5:1</td></tr>
         <tr><td style="color:var(--muted)">TP2</td><td class="g">$${fmt(t.tp2)} &mdash; R:R 2.5:1</td></tr>
         <tr><td style="color:var(--muted)">Conviction</td><td class="${convCls}">${t.conv}</td></tr>
@@ -683,14 +700,14 @@ async function update() {
 
   const d = await loadData();
   const price = d.ticker ? +d.ticker.lastPrice : null;
-  const i1d   = d.k1d ? processKlines(d.k1d) : null;
-  const i4h   = d.k4h ? processKlines(d.k4h) : null;
-  const i1h   = d.k1h ? processKlines(d.k1h) : null;
+  const i1d   = d.k1d ? processKlines(d.k1d, 1000) : null;
+  const i4h   = d.k4h ? processKlines(d.k4h, 500)  : null;
+  const i1h   = d.k1h ? processKlines(d.k1h, 250)  : null;
   const fr    = d.premium ? +d.premium.lastFundingRate : null;
   const fngV  = d.fng ? +d.fng.data[0].value : null;
 
   const seg   = sesgoCalc(price, i1d, i4h, fr, fngV);
-  const trade = tradeCalc(seg.label, seg.score, price, i1h?.atr);
+  const trade = tradeCalc(seg.label, seg.score, price, i1d, i4h, i1h);
 
   renderPrecio(d.ticker, i1d);
   renderMacro(d.sp, d.dxy, d.gold);
